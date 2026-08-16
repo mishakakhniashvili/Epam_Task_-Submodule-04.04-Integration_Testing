@@ -1,8 +1,6 @@
 package com.epam.gymcrm.config;
 
 import com.epam.gymcrm.security.JwtService;
-import com.nimbusds.jwt.JWTClaimsSet;
-import com.nimbusds.jwt.SignedJWT;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -14,7 +12,6 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtValidationException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -213,32 +210,4 @@ class SecurityConfigTest {
         );
     }
 
-    @Test
-    void generatedWorkloadServiceJwtShouldHaveWriteScopeAndAudience()
-            throws Exception {
-        String serviceToken =
-                jwtService.generateWorkloadServiceToken();
-
-        assertThrows(
-                JwtValidationException.class,
-                () -> jwtDecoder.decode(serviceToken)
-        );
-
-        JWTClaimsSet claims = SignedJWT
-                .parse(serviceToken)
-                .getJWTClaimsSet();
-
-        assertEquals(
-                "gym-crm-service",
-                claims.getSubject()
-        );
-        assertEquals(
-                List.of("trainer-workload-service"),
-                claims.getAudience()
-        );
-        assertEquals(
-                "workload.write",
-                claims.getStringClaim("scope")
-        );
-    }
 }

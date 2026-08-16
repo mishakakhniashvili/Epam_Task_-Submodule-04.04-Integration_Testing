@@ -1,9 +1,7 @@
 package com.epam.trainerworkload.controller;
 import com.epam.trainerworkload.dto.MonthlyWorkloadResponse;
-import com.epam.trainerworkload.dto.TrainerWorkloadRequest;
 import com.epam.trainerworkload.dto.TrainerWorkloadResponse;
 import com.epam.trainerworkload.service.TrainerWorkloadService;
-import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -21,27 +19,6 @@ import org.springframework.web.bind.annotation.*;
 public class TrainerWorkloadController {
 
     private final TrainerWorkloadService trainerWorkloadService;
-
-    @PostMapping("/workload-events")
-    public ResponseEntity<Void> updateWorkload(
-            @Valid @RequestBody TrainerWorkloadRequest request
-    ) {
-        log.info(
-                "Operation updateWorkload request: trainer={}, date={}, duration={}, action={}",
-                request.getTrainerUsername(),
-                request.getTrainingDate(),
-                request.getTrainingDuration(),
-                request.getActionType()
-        );
-
-        trainerWorkloadService.updateWorkload(request);
-
-        log.info(
-                "Operation updateWorkload response: status=200"
-        );
-
-        return ResponseEntity.ok().build();
-    }
 
     @GetMapping("/workload-events/{username}")
     public ResponseEntity<MonthlyWorkloadResponse> getMonthlyWorkload(

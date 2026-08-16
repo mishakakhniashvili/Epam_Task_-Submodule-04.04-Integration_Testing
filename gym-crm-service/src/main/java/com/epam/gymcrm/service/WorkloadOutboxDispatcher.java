@@ -1,7 +1,7 @@
 package com.epam.gymcrm.service;
 
-import com.epam.gymcrm.client.TrainerWorkloadClient;
 import com.epam.gymcrm.entity.WorkloadOutboxEvent;
+import com.epam.gymcrm.messaging.WorkloadEventPublisher;
 import com.epam.gymcrm.repository.WorkloadOutboxEventRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,7 +21,7 @@ public class WorkloadOutboxDispatcher {
     private static final String TRANSACTION_ID_MDC_KEY = "transactionId";
 
     private final WorkloadOutboxEventRepository outboxRepository;
-    private final TrainerWorkloadClient trainerWorkloadClient;
+    private final WorkloadEventPublisher eventPublisher;
     private final Clock clock;
 
     @Transactional(readOnly = true)
@@ -48,7 +48,7 @@ public class WorkloadOutboxDispatcher {
                     event.getTransactionId()
             );
 
-            trainerWorkloadClient.updateWorkload(event.toRequest());
+            eventPublisher.publish(event.toRequest());
             outboxRepository.delete(event);
 
             log.info(

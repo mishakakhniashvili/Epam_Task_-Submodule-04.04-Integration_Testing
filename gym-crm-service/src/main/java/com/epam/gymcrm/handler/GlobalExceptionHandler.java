@@ -4,7 +4,6 @@ import com.epam.gymcrm.dto.ErrorResponse;
 import com.epam.gymcrm.exception.AuthenticationException;
 import com.epam.gymcrm.exception.EntityNotFoundException;
 import com.epam.gymcrm.exception.ValidationException;
-import com.epam.gymcrm.exception.WorkloadServiceUnavailableException;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -77,16 +76,6 @@ public class GlobalExceptionHandler {
                 HttpStatus.BAD_REQUEST.getReasonPhrase(),
                 message);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST.value()).body(errorResponse);
-    }
-
-    @ExceptionHandler(WorkloadServiceUnavailableException.class)
-    public ResponseEntity<ErrorResponse> handleWorkloadServiceUnavailableException (WorkloadServiceUnavailableException ex) {
-        log.warn("Operation failed: status=503, message={}", ex.getMessage());
-        ErrorResponse errorResponse = new ErrorResponse(
-                HttpStatus.SERVICE_UNAVAILABLE.value(),
-                HttpStatus.SERVICE_UNAVAILABLE.getReasonPhrase(),
-                ex.getMessage());
-        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE.value()).body(errorResponse);
     }
 
     @ExceptionHandler({

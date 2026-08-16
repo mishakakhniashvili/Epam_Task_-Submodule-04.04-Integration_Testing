@@ -1,12 +1,12 @@
 package com.epam.gymcrm.service;
 
-import com.epam.gymcrm.client.TrainerWorkloadClient;
 import com.epam.gymcrm.dto.workload.ActionType;
 import com.epam.gymcrm.entity.Trainer;
 import com.epam.gymcrm.entity.Training;
 import com.epam.gymcrm.entity.TrainingType;
 import com.epam.gymcrm.entity.User;
 import com.epam.gymcrm.entity.WorkloadOutboxEvent;
+import com.epam.gymcrm.messaging.WorkloadEventPublisher;
 import com.epam.gymcrm.repository.WorkloadOutboxEventRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,19 +28,19 @@ import static org.mockito.Mockito.when;
 class WorkloadOutboxDispatcherTest {
 
     private WorkloadOutboxEventRepository outboxRepository;
-    private TrainerWorkloadClient trainerWorkloadClient;
+    private WorkloadEventPublisher eventPublisher;
     private WorkloadOutboxDispatcher dispatcher;
 
     @BeforeEach
     void setUp() {
         outboxRepository =
                 mock(WorkloadOutboxEventRepository.class);
-        trainerWorkloadClient =
-                mock(TrainerWorkloadClient.class);
+        eventPublisher =
+                mock(WorkloadEventPublisher.class);
 
         dispatcher = new WorkloadOutboxDispatcher(
                 outboxRepository,
-                trainerWorkloadClient,
+                eventPublisher,
                 Clock.fixed(
                         Instant.parse("2026-07-25T00:00:00Z"),
                         ZoneOffset.UTC
@@ -57,8 +57,7 @@ class WorkloadOutboxDispatcherTest {
 
         dispatcher.dispatchEvent(event.getEventId());
 
-        verify(trainerWorkloadClient)
-                .updateWorkload(any());
+        verify(eventPublisher).publish(any());
         verify(outboxRepository).delete(event);
     }
 
@@ -70,8 +69,8 @@ class WorkloadOutboxDispatcherTest {
                 .thenReturn(Optional.of(event));
 
         doThrow(new RuntimeException("workload unavailable"))
-                .when(trainerWorkloadClient)
-                .updateWorkload(any());
+                .when(eventPublisher)
+                .publish(any());
 
         dispatcher.dispatchEvent(event.getEventId());
 
