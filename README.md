@@ -4,7 +4,7 @@ This project contains:
 
 - `discovery-service` — Eureka server on port `8761`;
 - `gym-crm-service` — the main CRM API on port `8080` and workload-event producer;
-- `trainer-workload-service` — the H2-backed workload-event consumer and query API on port `8081`;
+- `trainer-workload-service` — the MongoDB-backed workload-event consumer and query API on port `8081`;
 - ActiveMQ — the message broker connecting the two application services.
 
 ## Required configuration
@@ -39,6 +39,13 @@ These values are already the local defaults, so they only need to be set when
 the broker configuration is different. No production secret or database
 password is stored in this repository.
 
+The workload service stores trainer workload summaries in MongoDB. Its URI is
+also configurable and defaults to the local `trainer_workload` database:
+
+```powershell
+$env:MONGODB_URI="mongodb://localhost:27017/trainer_workload"
+```
+
 ## Build and test
 
 ```powershell
@@ -62,19 +69,32 @@ All three packaged JARs are executable.
    docker start gym-activemq
    ```
 
-2. Start Eureka:
+2. Start MongoDB on port `27017`. Use an existing local MongoDB service, or
+   create a container the first time:
+
+   ```powershell
+   docker run --name gym-mongodb -p 27017:27017 -d mongo:7
+   ```
+
+   On later runs, start the existing container with:
+
+   ```powershell
+   docker start gym-mongodb
+   ```
+
+3. Start Eureka:
 
    ```powershell
    java -jar discovery-service/target/discovery-service-1.0-SNAPSHOT.jar
    ```
 
-3. Start the workload service:
+4. Start the workload service:
 
    ```powershell
    java -jar trainer-workload-service/target/trainer-workload-service-1.0-SNAPSHOT.jar
    ```
 
-4. Start the main service with a database profile:
+5. Start the main service with a database profile:
 
    ```powershell
    java -jar gym-crm-service/target/gym-crm-spring-boot-1.0-SNAPSHOT.jar --spring.profiles.active=local
@@ -113,7 +133,8 @@ database transaction. A scheduled outbox dispatcher sends pending events to
 ActiveMQ with the event ID and originating transaction ID. Failed sends remain
 in the outbox and are retried later.
 
-The workload service validates each message, processes `eventId` values
-idempotently, and serializes updates for the same trainer until the H2
-transaction commits. Messages that repeatedly fail consumption are routed by
-ActiveMQ to `ActiveMQ.DLQ` after the broker's redelivery limit is reached.
+The workload service validates each message, records processed `eventId` values
+in MongoDB for idempotency, and serializes updates for the same trainer while it
+updates the embedded year/month summary. Messages that repeatedly fail
+consumption are routed by ActiveMQ to `ActiveMQ.DLQ` after the broker's
+redelivery limit is reached.

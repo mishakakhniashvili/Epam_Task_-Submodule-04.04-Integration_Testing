@@ -2,18 +2,19 @@ package com.epam.trainerworkload.service;
 
 import com.epam.trainerworkload.dto.ActionType;
 import com.epam.trainerworkload.dto.TrainerWorkloadRequest;
-import com.epam.trainerworkload.entity.MonthlyWorkload;
 import com.epam.trainerworkload.entity.ProcessedWorkloadEvent;
 import com.epam.trainerworkload.entity.TrainerWorkload;
 import com.epam.trainerworkload.exception.MonthlyWorkloadNotFoundException;
 import com.epam.trainerworkload.exception.TrainerWorkloadNotFoundException;
-import com.epam.trainerworkload.repository.MonthlyWorkloadRepository;
 import com.epam.trainerworkload.repository.ProcessedWorkloadEventRepository;
 import com.epam.trainerworkload.repository.TrainerWorkloadRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import com.epam.trainerworkload.entity.MonthSummary;
+import com.epam.trainerworkload.entity.YearSummary;
+
+import java.util.ArrayList;
 
 @Slf4j
 @Service
@@ -21,10 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class TrainerWorkloadTransactionExecutor {
 
     private final TrainerWorkloadRepository trainerWorkloadRepository;
-    private final MonthlyWorkloadRepository monthlyWorkloadRepository;
     private final ProcessedWorkloadEventRepository processedEventRepository;
 
-    @Transactional
     public void process(
             TrainerWorkloadRequest request,
             String eventId
@@ -46,11 +45,10 @@ public class TrainerWorkloadTransactionExecutor {
         updateTrainerDetails(trainer, request);
 
         if (actionType == ActionType.ADD) {
-            MonthlyWorkload monthlyWorkload =
-                    findOrCreateMonthlyWorkload(request, trainer);
+            MonthSummary monthSummary = findOrCreateMonthSummary(request, trainer);
 
             addDuration(
-                    monthlyWorkload,
+                    monthSummary,
                     request.getTrainingDuration()
             );
         } else if (actionType == ActionType.DELETE) {
@@ -60,6 +58,9 @@ public class TrainerWorkloadTransactionExecutor {
                     "Invalid action type"
             );
         }
+
+        trainerWorkloadRepository.save(trainer);
+
 
         processedEventRepository.save(
                 new ProcessedWorkloadEvent(eventId)
@@ -117,7 +118,7 @@ public class TrainerWorkloadTransactionExecutor {
                     );
                     trainer.setActive(request.getActive());
 
-                    return trainerWorkloadRepository.save(trainer);
+                    return trainer;
                 });
     }
 
@@ -130,40 +131,46 @@ public class TrainerWorkloadTransactionExecutor {
         trainer.setActive(request.getActive());
     }
 
-    private MonthlyWorkload findOrCreateMonthlyWorkload(
+    private MonthSummary findOrCreateMonthSummary(
             TrainerWorkloadRequest request,
             TrainerWorkload trainer
     ) {
         int year = request.getTrainingDate().getYear();
         int month = request.getTrainingDate().getMonthValue();
 
-        return monthlyWorkloadRepository
-                .findByTrainerAndYearAndMonth(
-                        trainer,
-                        year,
-                        month
-                )
-                .orElseGet(() -> {
-                    MonthlyWorkload monthlyWorkload =
-                            new MonthlyWorkload();
+        YearSummary yearSummary = null;
+        for(YearSummary i : trainer.getYears()) {
+            if(year == i.getYear()) {
+                yearSummary = i;
+                break;
+            }
+        }
+        if(yearSummary == null) {
+            yearSummary = new YearSummary(year, new ArrayList<>());
+            trainer.getYears().add(yearSummary);
+        }
 
-                    monthlyWorkload.setTrainer(trainer);
-                    monthlyWorkload.setYear(year);
-                    monthlyWorkload.setMonth(month);
-                    monthlyWorkload.setTrainingSummaryDuration(0);
+        MonthSummary monthSummary = null;
+        for(MonthSummary i : yearSummary.getMonths()) {
+            if(month == i.getMonth()) {
+                monthSummary = i;
+                break;
+            }
+        }
+        if(monthSummary == null) {
+            monthSummary = new MonthSummary(month, 0);
+            yearSummary.getMonths().add(monthSummary);
+        }
 
-                    return monthlyWorkloadRepository.save(
-                            monthlyWorkload
-                    );
-                });
+        return monthSummary;
     }
 
     private void addDuration(
-            MonthlyWorkload monthlyWorkload,
+            MonthSummary monthSummary,
             int duration
     ) {
-        monthlyWorkload.setTrainingSummaryDuration(
-                monthlyWorkload.getTrainingSummaryDuration()
+        monthSummary.setTrainingSummaryDuration(
+                monthSummary.getTrainingSummaryDuration()
                         + duration
         );
     }
@@ -172,24 +179,25 @@ public class TrainerWorkloadTransactionExecutor {
             TrainerWorkloadRequest request,
             TrainerWorkload trainer
     ) {
+        MonthSummary monthSummary = null;
         int year = request.getTrainingDate().getYear();
         int month = request.getTrainingDate().getMonthValue();
-
-        MonthlyWorkload monthlyWorkload =
-                monthlyWorkloadRepository
-                        .findByTrainerAndYearAndMonth(
-                                trainer,
-                                year,
-                                month
-                        )
-                        .orElseThrow(() ->
-                                new MonthlyWorkloadNotFoundException(
-                                        "Monthly workload not found"
-                                )
-                        );
+        for(YearSummary i : trainer.getYears()) {
+            if(year == i.getYear()) {
+                for(MonthSummary j : i.getMonths()) {
+                    if (j.getMonth() == month) {
+                        monthSummary = j;
+                        break;
+                    }
+                }
+            }
+        }
+        if (monthSummary == null) {
+            throw new MonthlyWorkloadNotFoundException("Monthly workload not found: "+ month);
+        }
 
         int updatedDuration =
-                monthlyWorkload.getTrainingSummaryDuration()
+                monthSummary.getTrainingSummaryDuration()
                         - request.getTrainingDuration();
 
         if (updatedDuration < 0) {
@@ -198,7 +206,7 @@ public class TrainerWorkloadTransactionExecutor {
             );
         }
 
-        monthlyWorkload.setTrainingSummaryDuration(
+        monthSummary.setTrainingSummaryDuration(
                 updatedDuration
         );
     }

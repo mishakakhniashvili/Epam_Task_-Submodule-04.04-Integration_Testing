@@ -1,13 +1,11 @@
 package com.epam.trainerworkload.service;
 
-import com.epam.trainerworkload.dto.ActionType;
-import com.epam.trainerworkload.dto.TrainerWorkloadRequest;
-import com.epam.trainerworkload.entity.MonthlyWorkload;
+import com.epam.trainerworkload.dto.MonthlyWorkloadResponse;
+import com.epam.trainerworkload.dto.TrainerWorkloadResponse;
+import com.epam.trainerworkload.entity.MonthSummary;
 import com.epam.trainerworkload.entity.TrainerWorkload;
-import com.epam.trainerworkload.exception.MonthlyWorkloadNotFoundException;
+import com.epam.trainerworkload.entity.YearSummary;
 import com.epam.trainerworkload.exception.TrainerWorkloadNotFoundException;
-import com.epam.trainerworkload.repository.MonthlyWorkloadRepository;
-import com.epam.trainerworkload.repository.ProcessedWorkloadEventRepository;
 import com.epam.trainerworkload.repository.TrainerWorkloadRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,11 +13,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class TrainerWorkloadServiceTest {
@@ -28,275 +29,135 @@ class TrainerWorkloadServiceTest {
     private TrainerWorkloadRepository trainerWorkloadRepository;
 
     @Mock
-    private MonthlyWorkloadRepository monthlyWorkloadRepository;
+    private TrainerWorkloadTransactionExecutor transactionExecutor;
 
     @Mock
-    private ProcessedWorkloadEventRepository processedWorkloadEventRepository;
+    private WorkloadUpdateLockManager lockManager;
 
-    private TrainerWorkloadTransactionExecutor transactionExecutor;
+    private TrainerWorkloadService service;
 
     @BeforeEach
     void setUp() {
-        transactionExecutor = new TrainerWorkloadTransactionExecutor(
+        service = new TrainerWorkloadService(
                 trainerWorkloadRepository,
-                monthlyWorkloadRepository,
-                processedWorkloadEventRepository
+                transactionExecutor,
+                lockManager
         );
     }
 
     @Test
-    void shouldCreateTrainerAndMonthlyWorkloadForAddAction() {
-        TrainerWorkloadRequest request = createRequest(
-                ActionType.ADD,
-                60,
-                LocalDate.of(2026, 7, 15)
-        );
-
+    void shouldReturnExistingMonthlyDuration() {
         when(trainerWorkloadRepository.findByUsername("john.smith"))
-                .thenReturn(Optional.empty());
+                .thenReturn(Optional.of(trainer()));
 
-        when(trainerWorkloadRepository.save(any(TrainerWorkload.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
-
-        when(monthlyWorkloadRepository.findByTrainerAndYearAndMonth(
-                any(TrainerWorkload.class), eq(2026), eq(7)
-        )).thenReturn(Optional.empty());
-
-        when(monthlyWorkloadRepository.save(any(MonthlyWorkload.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
-
-        transactionExecutor.process(request, "event-1");
-
-        verify(trainerWorkloadRepository).save(
-                argThat(trainer ->
-                        trainer.getUsername().equals("john.smith")
-                                && trainer.getFirstName().equals("John")
-                                && trainer.getLastName().equals("Smith")
-                                && trainer.isActive()
-                )
+        MonthlyWorkloadResponse response = service.getMonthlyWorkload(
+                "john.smith",
+                2026,
+                7
         );
 
-        verify(monthlyWorkloadRepository).save(
-                argThat(workload ->
-                        workload.getYear() == 2026
-                                && workload.getMonth() == 7
-                                && workload.getTrainingSummaryDuration() == 60
-                )
-        );
+        assertEquals("john.smith", response.trainerUsername());
+        assertEquals(90, response.trainingSummaryDuration());
     }
 
     @Test
-    void shouldAddDurationToExistingMonthlyWorkload() {
-        TrainerWorkloadRequest request = createRequest(
-                ActionType.ADD,
-                30,
-                LocalDate.of(2026, 7, 20)
+    void shouldReturnZeroWhenRequestedMonthDoesNotExist() {
+        when(trainerWorkloadRepository.findByUsername("john.smith"))
+                .thenReturn(Optional.of(trainer()));
+
+        MonthlyWorkloadResponse response = service.getMonthlyWorkload(
+                "john.smith",
+                2026,
+                9
         );
 
-        TrainerWorkload trainer = createTrainer();
-        MonthlyWorkload monthlyWorkload =
-                createMonthlyWorkload(trainer, 2026, 7, 60);
-
-        when(trainerWorkloadRepository.findByUsername("john.smith"))
-                .thenReturn(Optional.of(trainer));
-
-        when(monthlyWorkloadRepository.findByTrainerAndYearAndMonth(
-                trainer, 2026, 7
-        )).thenReturn(Optional.of(monthlyWorkload));
-
-        transactionExecutor.process(request, "event-1");
-
-        assertEquals(90, monthlyWorkload.getTrainingSummaryDuration());
-        assertEquals("John", trainer.getFirstName());
-        assertEquals("Smith", trainer.getLastName());
-        assertTrue(trainer.isActive());
-
-        verify(trainerWorkloadRepository, never()).save(any());
-        verify(monthlyWorkloadRepository, never()).save(any());
+        assertEquals(0, response.trainingSummaryDuration());
     }
 
     @Test
-    void shouldSubtractDurationForDeleteAction() {
-        TrainerWorkloadRequest request = createRequest(
-                ActionType.DELETE,
-                30,
-                LocalDate.of(2026, 7, 20)
+    void shouldReturnAllEmbeddedYearsAndMonths() {
+        when(trainerWorkloadRepository.findByUsername("john.smith"))
+                .thenReturn(Optional.of(trainer()));
+
+        TrainerWorkloadResponse response = service.getTrainerWorkload(
+                "john.smith",
+                null,
+                null
         );
 
-        TrainerWorkload trainer = createTrainer();
-        MonthlyWorkload monthlyWorkload =
-                createMonthlyWorkload(trainer, 2026, 7, 90);
-
-        when(trainerWorkloadRepository.findByUsername("john.smith"))
-                .thenReturn(Optional.of(trainer));
-
-        when(monthlyWorkloadRepository.findByTrainerAndYearAndMonth(
-                trainer, 2026, 7
-        )).thenReturn(Optional.of(monthlyWorkload));
-
-        transactionExecutor.process(request, "event-1");
-
-        assertEquals(60, monthlyWorkload.getTrainingSummaryDuration());
+        assertEquals(2, response.years().size());
+        assertEquals(2026, response.years().get(0).year());
+        assertEquals(2, response.years().get(0).months().size());
+        assertEquals(90, response.years().get(0).months().get(0)
+                .trainingSummaryDuration());
+        assertEquals(2027, response.years().get(1).year());
     }
 
     @Test
-    void shouldAllowDurationToBecomeZeroForDeleteAction() {
-        TrainerWorkloadRequest request = createRequest(
-                ActionType.DELETE,
-                60,
-                LocalDate.of(2026, 7, 20)
+    void shouldReturnOnlyTheRequestedYearAndMonth() {
+        when(trainerWorkloadRepository.findByUsername("john.smith"))
+                .thenReturn(Optional.of(trainer()));
+
+        TrainerWorkloadResponse response = service.getTrainerWorkload(
+                "john.smith",
+                2026,
+                8
         );
 
-        TrainerWorkload trainer = createTrainer();
-        MonthlyWorkload monthlyWorkload =
-                createMonthlyWorkload(trainer, 2026, 7, 60);
-
-        when(trainerWorkloadRepository.findByUsername("john.smith"))
-                .thenReturn(Optional.of(trainer));
-
-        when(monthlyWorkloadRepository.findByTrainerAndYearAndMonth(
-                trainer, 2026, 7
-        )).thenReturn(Optional.of(monthlyWorkload));
-
-        transactionExecutor.process(request, "event-1");
-
-        assertEquals(0, monthlyWorkload.getTrainingSummaryDuration());
+        assertEquals(1, response.years().size());
+        assertEquals(2026, response.years().get(0).year());
+        assertEquals(1, response.years().get(0).months().size());
+        assertEquals(8, response.years().get(0).months().get(0).month());
+        assertEquals(30, response.years().get(0).months().get(0)
+                .trainingSummaryDuration());
     }
 
     @Test
-    void shouldThrowExceptionWhenDeleteWouldCreateNegativeDuration() {
-        TrainerWorkloadRequest request = createRequest(
-                ActionType.DELETE,
-                90,
-                LocalDate.of(2026, 7, 20)
-        );
-
-        TrainerWorkload trainer = createTrainer();
-        MonthlyWorkload monthlyWorkload =
-                createMonthlyWorkload(trainer, 2026, 7, 60);
-
-        when(trainerWorkloadRepository.findByUsername("john.smith"))
-                .thenReturn(Optional.of(trainer));
-
-        when(monthlyWorkloadRepository.findByTrainerAndYearAndMonth(
-                trainer, 2026, 7
-        )).thenReturn(Optional.of(monthlyWorkload));
-
+    void shouldRejectOnlyOneDateFilter() {
         IllegalArgumentException exception = assertThrows(
                 IllegalArgumentException.class,
-                () -> transactionExecutor.process(request, "event-1")
+                () -> service.getTrainerWorkload("john.smith", 2026, null)
         );
 
         assertEquals(
-                "Training summary duration cannot be negative",
+                "Year and month must be provided together",
                 exception.getMessage()
         );
-
-        assertEquals(60, monthlyWorkload.getTrainingSummaryDuration());
+        verifyNoInteractions(trainerWorkloadRepository);
     }
 
     @Test
-    void shouldThrowExceptionWhenTrainerDoesNotExistForDeleteAction() {
-        TrainerWorkloadRequest request = createRequest(
-                ActionType.DELETE,
-                30,
-                LocalDate.of(2026, 7, 20)
-        );
-
-        when(trainerWorkloadRepository.findByUsername("john.smith"))
+    void shouldRejectUnknownTrainer() {
+        when(trainerWorkloadRepository.findByUsername("unknown"))
                 .thenReturn(Optional.empty());
 
         assertThrows(
                 TrainerWorkloadNotFoundException.class,
-                () -> transactionExecutor.process(request, "event-1")
-        );
-
-        verifyNoInteractions(monthlyWorkloadRepository);
-    }
-
-    @Test
-    void shouldThrowExceptionWhenMonthlyWorkloadDoesNotExistForDeleteAction() {
-        TrainerWorkloadRequest request = createRequest(
-                ActionType.DELETE,
-                30,
-                LocalDate.of(2026, 7, 20)
-        );
-
-        TrainerWorkload trainer = createTrainer();
-
-        when(trainerWorkloadRepository.findByUsername("john.smith"))
-                .thenReturn(Optional.of(trainer));
-
-        when(monthlyWorkloadRepository.findByTrainerAndYearAndMonth(
-                trainer, 2026, 7
-        )).thenReturn(Optional.empty());
-
-        assertThrows(
-                MonthlyWorkloadNotFoundException.class,
-                () -> transactionExecutor.process(request, "event-1")
+                () -> service.getMonthlyWorkload("unknown", 2026, 7)
         );
     }
 
-    @Test
-    void shouldIgnoreAlreadyProcessedEvent() {
-        TrainerWorkloadRequest request =
-                mock(TrainerWorkloadRequest.class);
-
-        when(processedWorkloadEventRepository.existsById("event-1"))
-                .thenReturn(true);
-
-        transactionExecutor.process(request, "event-1");
-
-        verify(processedWorkloadEventRepository)
-                .existsById("event-1");
-
-        verifyNoInteractions(
-                trainerWorkloadRepository,
-                monthlyWorkloadRepository
-        );
-
-        verify(
-                processedWorkloadEventRepository,
-                never()
-        ).save(any());
-    }
-    private TrainerWorkloadRequest createRequest(
-            ActionType actionType,
-            int duration,
-            LocalDate date
-    ) {
-        TrainerWorkloadRequest request = mock(TrainerWorkloadRequest.class);
-
-        when(request.getTrainerUsername()).thenReturn("john.smith");
-        lenient().when(request.getTrainerFirstName()).thenReturn("John");
-        lenient().when(request.getTrainerLastName()).thenReturn("Smith");
-        lenient().when(request.getActive()).thenReturn(true);
-        lenient().when(request.getTrainingDate()).thenReturn(date);
-        lenient().when(request.getTrainingDuration()).thenReturn(duration);
-        when(request.getActionType()).thenReturn(actionType);
-        return request;
-    }
-
-    private TrainerWorkload createTrainer() {
+    private TrainerWorkload trainer() {
         TrainerWorkload trainer = new TrainerWorkload();
         trainer.setUsername("john.smith");
-        trainer.setFirstName("Old");
-        trainer.setLastName("Name");
-        trainer.setActive(false);
+        trainer.setFirstName("John");
+        trainer.setLastName("Smith");
+        trainer.setActive(true);
+        trainer.setYears(new ArrayList<>(List.of(
+                new YearSummary(
+                        2026,
+                        new ArrayList<>(List.of(
+                                new MonthSummary(7, 90),
+                                new MonthSummary(8, 30)
+                        ))
+                ),
+                new YearSummary(
+                        2027,
+                        new ArrayList<>(List.of(
+                                new MonthSummary(1, 45)
+                        ))
+                )
+        )));
         return trainer;
-    }
-
-    private MonthlyWorkload createMonthlyWorkload(
-            TrainerWorkload trainer,
-            int year,
-            int month,
-            int duration
-    ) {
-        MonthlyWorkload workload = new MonthlyWorkload();
-        workload.setTrainer(trainer);
-        workload.setYear(year);
-        workload.setMonth(month);
-        workload.setTrainingSummaryDuration(duration);
-        return workload;
     }
 }

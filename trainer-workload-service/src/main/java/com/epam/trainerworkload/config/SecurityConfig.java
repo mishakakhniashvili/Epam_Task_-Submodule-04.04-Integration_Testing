@@ -25,12 +25,8 @@ public class SecurityConfig {
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
-                .headers(headers -> headers
-                        .frameOptions(frame -> frame.sameOrigin())
-                )
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
-                                "/h2-console/**",
                                 "/actuator/health",
                                 "/actuator/info"
                         ).permitAll()

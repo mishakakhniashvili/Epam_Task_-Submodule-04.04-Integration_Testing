@@ -5,6 +5,7 @@ import com.epam.trainerworkload.service.TrainerWorkloadService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.jms.annotation.JmsListener;
 import org.springframework.messaging.handler.annotation.Header;
@@ -15,6 +16,7 @@ import jakarta.validation.ConstraintViolationException;
 import java.util.Set;
 import static com.epam.trainerworkload.filter.TransactionIdFilter.TRANSACTION_ID_MDC_KEY;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class WorkloadEventListener {
@@ -31,7 +33,7 @@ public class WorkloadEventListener {
             )
             String transactionId
     ) {
-        String previousTransactionId = MDC.get("transactionId");
+        String previousTransactionId = MDC.get(TRANSACTION_ID_MDC_KEY);
         try {
             if (transactionId == null || transactionId.isBlank()) {
                 MDC.remove(TRANSACTION_ID_MDC_KEY);
@@ -41,6 +43,7 @@ public class WorkloadEventListener {
                         transactionId
                 );
             }
+            log.info("Workload event processing started");
 
             TrainerWorkloadRequest request =
                     objectMapper.readValue(
@@ -60,12 +63,22 @@ public class WorkloadEventListener {
                 );
             }
             trainerWorkloadService.updateWorkload(request);
+            log.info("processing succeeded, including eventId={}, username={}, and action={}",
+                    request.getEventId(),
+                    request.getTrainerUsername(),
+                    request.getActionType());
+
         } catch (JsonProcessingException exception) {
+            log.error("processing failed", exception);
             throw new IllegalArgumentException(
                     "Invalid workload event JSON",
                     exception
             );
-        } finally {
+        } catch (RuntimeException exception) {
+            log.error("Workload event processing failed", exception);
+            throw exception;
+        }
+        finally {
             if (previousTransactionId == null) {
                 MDC.remove(TRANSACTION_ID_MDC_KEY);
             } else {

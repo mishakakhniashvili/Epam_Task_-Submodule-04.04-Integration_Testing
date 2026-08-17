@@ -5,19 +5,16 @@ import com.epam.trainerworkload.dto.MonthlyWorkloadResponse;
 import com.epam.trainerworkload.dto.TrainerWorkloadRequest;
 import com.epam.trainerworkload.dto.TrainerWorkloadResponse;
 import com.epam.trainerworkload.dto.YearWorkloadResponse;
-import com.epam.trainerworkload.entity.MonthlyWorkload;
 import com.epam.trainerworkload.entity.TrainerWorkload;
+import com.epam.trainerworkload.entity.MonthSummary;
+import com.epam.trainerworkload.entity.YearSummary;
 import com.epam.trainerworkload.exception.TrainerWorkloadNotFoundException;
-import com.epam.trainerworkload.repository.MonthlyWorkloadRepository;
 import com.epam.trainerworkload.repository.TrainerWorkloadRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -25,7 +22,6 @@ import java.util.UUID;
 public class TrainerWorkloadService {
 
     private final TrainerWorkloadRepository trainerWorkloadRepository;
-    private final MonthlyWorkloadRepository monthlyWorkloadRepository;
     private final TrainerWorkloadTransactionExecutor transactionExecutor;
     private final WorkloadUpdateLockManager lockManager;
 
@@ -39,22 +35,13 @@ public class TrainerWorkloadService {
         );
     }
 
-    @Transactional(readOnly = true)
     public MonthlyWorkloadResponse getMonthlyWorkload(
             String username,
             int year,
             int month
     ) {
         TrainerWorkload trainer = findTrainer(username);
-
-        int duration = monthlyWorkloadRepository
-                .findByTrainerAndYearAndMonth(
-                        trainer,
-                        year,
-                        month
-                )
-                .map(MonthlyWorkload::getTrainingSummaryDuration)
-                .orElse(0);
+        int duration =  findDuration(trainer, year, month);
 
         return new MonthlyWorkloadResponse(
                 trainer.getUsername(),
@@ -67,7 +54,6 @@ public class TrainerWorkloadService {
         );
     }
 
-    @Transactional(readOnly = true)
     public TrainerWorkloadResponse getTrainerWorkload(
             String username,
             Integer year,
@@ -80,41 +66,25 @@ public class TrainerWorkloadService {
         }
 
         TrainerWorkload trainer = findTrainer(username);
-        List<MonthlyWorkload> workloads;
+
+        List<YearWorkloadResponse> years;
 
         if (year == null) {
-            workloads = monthlyWorkloadRepository
-                    .findAllByTrainerOrderByYearAscMonthAsc(
-                            trainer
-                    );
+            years = toYearResponses(trainer.getYears());
         } else {
-            workloads = monthlyWorkloadRepository
-                    .findByTrainerAndYearAndMonth(
-                            trainer,
-                            year,
-                            month
-                    )
-                    .map(List::of)
-                    .orElseGet(List::of);
-        }
+            int duration = findDuration(trainer, year, month);
 
-        List<YearWorkloadResponse> years =
-                toYearResponses(workloads);
+            MonthWorkloadResponse monthResponse =
+                    new MonthWorkloadResponse(month, duration);
 
-        if (year != null && years.isEmpty()) {
-            years = List.of(
+            YearWorkloadResponse yearResponse =
                     new YearWorkloadResponse(
                             year,
-                            List.of(
-                                    new MonthWorkloadResponse(
-                                            month,
-                                            0
-                                    )
-                            )
-                    )
-            );
-        }
+                            List.of(monthResponse)
+                    );
 
+            years = List.of(yearResponse);
+        }
         return new TrainerWorkloadResponse(
                 trainer.getUsername(),
                 trainer.getFirstName(),
@@ -125,32 +95,18 @@ public class TrainerWorkloadService {
     }
 
     private List<YearWorkloadResponse> toYearResponses(
-            List<MonthlyWorkload> workloads
+            List<YearSummary> summaries
     ) {
-        Map<Integer, List<MonthWorkloadResponse>> byYear =
-                new LinkedHashMap<>();
+        List<YearWorkloadResponse> responses = new ArrayList<>();
 
-        for (MonthlyWorkload workload : workloads) {
-            byYear.computeIfAbsent(
-                    workload.getYear(),
-                    ignored -> new ArrayList<>()
-            ).add(
-                    new MonthWorkloadResponse(
-                            workload.getMonth(),
-                            workload.getTrainingSummaryDuration()
-                    )
-            );
+        for (YearSummary yearSummary : summaries) {
+            List<MonthWorkloadResponse> monthResponses = new ArrayList<>();
+            for(MonthSummary monthSummary : yearSummary.getMonths()) {
+                monthResponses.add(new MonthWorkloadResponse(monthSummary.getMonth(),monthSummary.getTrainingSummaryDuration()));
+            }
+            responses.add(new YearWorkloadResponse(yearSummary.getYear(),monthResponses));
         }
-
-        return byYear.entrySet()
-                .stream()
-                .map(entry ->
-                        new YearWorkloadResponse(
-                                entry.getKey(),
-                                List.copyOf(entry.getValue())
-                        )
-                )
-                .toList();
+        return responses;
     }
 
     private TrainerWorkload findTrainer(String username) {
@@ -170,5 +126,23 @@ public class TrainerWorkloadService {
         }
 
         return eventId;
+    }
+    private int findDuration(
+            TrainerWorkload trainer,
+            int year,
+            int month
+    ){
+        int duration;
+
+        for(YearSummary yearSummary : trainer.getYears()) {
+            if (year == yearSummary.getYear()) {
+                for(MonthSummary monthSummary : yearSummary.getMonths()) {
+                    if(monthSummary.getMonth() == month){
+                        duration = monthSummary.getTrainingSummaryDuration();
+                        return duration;
+                    }
+                }            }
+        }
+        return 0;
     }
 }
