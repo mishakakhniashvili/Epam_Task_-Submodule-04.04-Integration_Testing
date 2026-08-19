@@ -55,6 +55,32 @@ mvn package -DskipTests
 
 All three packaged JARs are executable.
 
+## BDD test layers
+
+The Cucumber tests are split by test boundary:
+
+- `gym-crm-service` contains Gym CRM component scenarios. They exercise the
+  real HTTP, validation, service, security, and H2 persistence stack while
+  keeping external messaging out of the component boundary.
+- `trainer-workload-service` contains Trainer Workload component scenarios.
+  They exercise the real HTTP, security, controller, and service stack while
+  replacing the external MongoDB repositories with mocks.
+- `integration-tests` starts both real application contexts on random ports
+  and verifies the complete HTTP -> outbox -> ActiveMQ -> consumer -> MongoDB
+  flow. H2, an embedded ActiveMQ broker, and an in-memory Mongo-compatible
+  server are created by the test, so Docker is not required.
+
+Every feature contains both a positive scenario and a negative scenario. Run
+one layer while developing with:
+
+```powershell
+mvn -f gym-crm-service/pom.xml "-Dtest=RunGymCrmComponentTest" test
+mvn -f trainer-workload-service/pom.xml "-Dtest=RunTrainerWorkloadComponentTest" test
+mvn -pl integration-tests -am test "-Dtest=RunMicroservicesIntegrationTest" "-Dsurefire.failIfNoSpecifiedTests=false"
+```
+
+Run all unit, component, and integration tests together with `mvn clean test`.
+
 ## Start order
 
 1. Start ActiveMQ. To create the local container the first time:
